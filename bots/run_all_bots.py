@@ -8,6 +8,7 @@ BOT_MODULES = [
     "bots.causes.shockBot",
     "bots.causes.trendBot",
     "bots.causes.meanReversionBot",
+    "bots.causes.bot28867",
 ]
 
 processes = []

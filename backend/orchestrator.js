@@ -31,6 +31,7 @@ const BOT_CONFIGS = [
   { module: "bots.causes.shockBot", name: "Bot de Choque" },
   { module: "bots.causes.trendBot", name: "Bot de Tendência" },
   { module: "bots.causes.meanReversionBot", name: "Bot de Reversão à Média" },
+  { module: "bots.causes.bot28867", name: "Bot28867" },
 ];
 
 function resolvePythonCommand() {

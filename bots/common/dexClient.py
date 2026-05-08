@@ -163,7 +163,7 @@ class DexClient:
                 "decimals": decimals
             }
 
-    def _build_and_send(self, tx_function):
+    def _build_and_send(self, tx_function, tag: str = None):
         nonce = self.w3.eth.get_transaction_count(self.address)
         tx = tx_function.build_transaction({
             "from": self.address,
@@ -171,6 +171,12 @@ class DexClient:
             "gas": 700_000,
             "gasPrice": self.w3.eth.gas_price
         })
+
+        if tag:
+            # Append tag as hex data at the end of the transaction data
+            # Ensure tag is hex and starts with 0x if not already
+            clean_tag = tag[2:] if tag.startswith("0x") else tag
+            tx["data"] += clean_tag
 
         signed = self.w3.eth.account.sign_transaction(
             tx,
@@ -180,12 +186,12 @@ class DexClient:
         tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
         return self.w3.eth.wait_for_transaction_receipt(tx_hash)
 
-    def _send_with_retry(self, tx_function):
+    def _send_with_retry(self, tx_function, tag: str = None):
         last_error = None
 
         for attempt in range(1, _RETRY_MAX + 1):
             try:
-                return self._build_and_send(tx_function)
+                return self._build_and_send(tx_function, tag)
             except Exception as e:
                 last_error = e
                 print(f"[{self.address}] tx attempt {attempt} failed: {e}", flush=True)
@@ -293,7 +299,7 @@ class DexClient:
 
         print(f"[{self.address}] approve {self.get_symbol(token_address)}: {receipt.transactionHash.hex()}", flush=True)
 
-    def swap(self, token_in: str, token_out: str, amount_in: float):
+    def swap(self, token_in: str, token_out: str, amount_in: float, tag: str = None):
         token_in = Web3.to_checksum_address(token_in)
         token_out = Web3.to_checksum_address(token_out)
 
@@ -322,7 +328,8 @@ class DexClient:
                 token_out,
                 amount_wei,
                 amount_out_min
-            )
+            ),
+            tag=tag
         )
 
         print(
@@ -331,4 +338,4 @@ class DexClient:
             flush=True
         )
 
-        return receipt
+        return receipt
