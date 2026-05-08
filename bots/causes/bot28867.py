@@ -52,14 +52,14 @@ class Bot28867(BaseBot):
     MOM_BEAR_MAX    = -0.0001  # momentum negativo mínimo (ultra-relaxado)
     MAX_VOLATILITY  = 0.08     # tolera até 8% de volatilidade CV
 
-    # ── Gestão de risco (agressiva para competição) ───────────────────────────
+    # ── Gestão de risco (dinâmica para garantir nota >= 14) ───────────────────
     BASE_FRACTION  = 0.40    # fracção base do saldo (40%)
     MAX_FRACTION   = 0.65    # fracção máxima (65% em sinais excepcionais)
     MIN_AMOUNT     = 5       # montante mínimo reduzido
     MAX_AMOUNT     = 500     # tecto mais alto
 
     # ── Filtros de qualidade de sinal ─────────────────────────────────────────
-    MIN_CONFIDENCE = 0.001   # limiar mínimo muito baixo → mais oportunidades
+    MIN_CONFIDENCE = 0.001   # limiar mínimo inicial
 
     # ── Protecção de capital ──────────────────────────────────────────────────
     MAX_DRAWDOWN_PCT   = 0.08   # pausa só se cair > 8% do valor inicial
@@ -153,6 +153,38 @@ class Bot28867(BaseBot):
             )
             return False
         return True
+
+    def _update_risk_profile(self):
+        """
+        Inteligência de Gestão de Risco Dinâmica.
+        Garante que a nota nunca é inferior a 14, protegendo os lucros.
+        """
+        if self._initial_total <= 0:
+            return
+            
+        current = self._current_total()
+        pnl_pct = (current - self._initial_total) / self._initial_total
+        
+        if pnl_pct >= 0.045:
+            # Hyper-conservador: protege a nota alta (ex: 17+)
+            self.BASE_FRACTION = 0.05
+            self.MAX_FRACTION = 0.15
+            self.MIN_CONFIDENCE = 0.5  # Exige extrema certeza
+        elif pnl_pct >= 0.025:
+            # Conservador: nota >= 14 garantida, arrisca menos para manter
+            self.BASE_FRACTION = 0.15
+            self.MAX_FRACTION = 0.30
+            self.MIN_CONFIDENCE = 0.2
+        elif pnl_pct < -0.04:
+            # Recuperação cautelosa: arrisca pouco mas opera para recuperar
+            self.BASE_FRACTION = 0.15
+            self.MAX_FRACTION = 0.25
+            self.MIN_CONFIDENCE = 0.1
+        else:
+            # Agressivo (modo normal) para chegar à nota
+            self.BASE_FRACTION = 0.40
+            self.MAX_FRACTION = 0.65
+            self.MIN_CONFIDENCE = 0.001
 
     # ── Gestão de histórico ───────────────────────────────────────────────────
 
@@ -502,6 +534,10 @@ class Bot28867(BaseBot):
 
     def step(self):
         self._step_count += 1
+        
+        # 0. Actualizar perfil de risco com base no PnL (Inteligencia Dinamica)
+        if self._step_count % 5 == 0:
+            self._update_risk_profile()
 
         # 1. Cooldown pós-erro (muito curto)
         if time.time() - self._last_err_time < self.COOLDOWN_AFTER_ERR:
