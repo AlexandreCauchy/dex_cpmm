@@ -291,8 +291,8 @@ class Bot28867(BaseBot):
             if expected_no_fee <= 0:
                 return True
 
-            # Só executa se receber pelo menos 98.5% do esperado sem fee
-            return out_amt >= expected_no_fee * 0.985
+            # Só executa se receber pelo menos 90.0% do esperado sem fee (permite ate 10% de slippage+taxa)
+            return out_amt >= expected_no_fee * 0.900
         except Exception:
             return True  # em caso de erro, não bloquear
 
