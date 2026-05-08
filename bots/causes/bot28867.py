@@ -3,6 +3,8 @@ import sys
 import time
 import random
 import math
+import json
+import os
 from dotenv import load_dotenv
 from bots.common.botBase import BaseBot
 
@@ -96,6 +98,10 @@ class Bot28867(BaseBot):
         self._cached_balances: dict = {}
         self._cache_time: float = 0.0
         self._cache_ttl: float = 1.5  # refresca cache a cada 1.5s
+        
+        # Alvo interativo
+        self._interactive_target = ""
+        self._interactive_active = False
 
     # ── Logging ───────────────────────────────────────────────────────────────
 
@@ -185,6 +191,32 @@ class Bot28867(BaseBot):
             self.BASE_FRACTION = 0.40
             self.MAX_FRACTION = 0.65
             self.MIN_CONFIDENCE = 0.001
+
+    def _read_interactive_target(self):
+        """Lê o ficheiro target_token.json para definir qual token acumular agressivamente."""
+        try:
+            path = os.path.join(os.getcwd(), "target_token.json")
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self._interactive_target = data.get("target", "").strip()
+                    self._interactive_active = data.get("active", False)
+        except Exception:
+            pass
+
+    def _is_target(self, token_address: str) -> bool:
+        if not self._interactive_active or not self._interactive_target:
+            return False
+        
+        target = self._interactive_target.upper()
+        if target.startswith("0X") and token_address.lower() == target.lower():
+            return True
+            
+        for t_addr, t_data in self.client.tokens.items():
+            if t_addr.lower() == token_address.lower():
+                if target in t_data.get("symbol", "").upper():
+                    return True
+        return False
 
     # ── Gestão de histórico ───────────────────────────────────────────────────
 
@@ -418,6 +450,14 @@ class Bot28867(BaseBot):
                 if mom_l > 0.01:
                     conf *= 1.15
 
+                # Bias Interativo
+                t_in = pool["token1"]
+                t_out = pool["token0"]
+                if self._is_target(t_out):
+                    conf *= 15.0
+                elif self._is_target(t_in):
+                    conf *= 0.05
+
                 if conf > best_conf:
                     best_conf = conf
                     fraction = min(self.MAX_FRACTION,
@@ -452,6 +492,14 @@ class Bot28867(BaseBot):
                 if mom_l < -0.01:
                     conf *= 1.15
 
+                # Bias Interativo
+                t_in = pool["token0"]
+                t_out = pool["token1"]
+                if self._is_target(t_out):
+                    conf *= 15.0
+                elif self._is_target(t_in):
+                    conf *= 0.05
+
                 if conf > best_conf:
                     best_conf = conf
                     fraction = min(self.MAX_FRACTION,
@@ -469,6 +517,15 @@ class Bot28867(BaseBot):
 
             elif mom > 0.008 and mom_l > 0.005 and rsi < 72 and rsi > self.RSI_OS:
                 conf = mom * 18 + mom_l * 9 + max(0, trend) * 4
+                
+                # Bias Interativo
+                t_in = pool["token1"]
+                t_out = pool["token0"]
+                if self._is_target(t_out):
+                    conf *= 15.0
+                elif self._is_target(t_in):
+                    conf *= 0.05
+
                 if conf > best_conf:
                     best_conf = conf
                     fraction = min(self.MAX_FRACTION, self.BASE_FRACTION + conf * 0.4)
@@ -480,6 +537,15 @@ class Bot28867(BaseBot):
 
             elif mom < -0.008 and mom_l < -0.005 and rsi > 28 and rsi < self.RSI_OB:
                 conf = abs(mom) * 18 + abs(mom_l) * 9 + max(0, -trend) * 4
+                
+                # Bias Interativo
+                t_in = pool["token0"]
+                t_out = pool["token1"]
+                if self._is_target(t_out):
+                    conf *= 15.0
+                elif self._is_target(t_in):
+                    conf *= 0.05
+
                 if conf > best_conf:
                     best_conf = conf
                     fraction = min(self.MAX_FRACTION, self.BASE_FRACTION + conf * 0.4)
@@ -534,6 +600,9 @@ class Bot28867(BaseBot):
 
     def step(self):
         self._step_count += 1
+        
+        # Atualizar configuração interativa
+        self._read_interactive_target()
         
         # 0. Actualizar perfil de risco com base no PnL (Inteligencia Dinamica)
         if self._step_count % 5 == 0:
