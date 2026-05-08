@@ -199,8 +199,26 @@ class Bot28867(BaseBot):
             if os.path.exists(path):
                 with open(path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    self._interactive_target = data.get("target", "").strip()
+                    target = data.get("target", "").strip().upper()
                     self._interactive_active = data.get("active", False)
+                    
+                    if target == "HEAVIEST" and self._interactive_active:
+                        try:
+                            import urllib.request
+                            req = urllib.request.Request("http://localhost:3001/admin/grading-weights")
+                            with urllib.request.urlopen(req, timeout=1.0) as response:
+                                w_data = json.loads(response.read().decode())
+                                if w_data.get("ok") and w_data.get("weights"):
+                                    weights = w_data["weights"]
+                                    best = max(weights, key=weights.get)
+                                    if weights[best] > 0:
+                                        self._interactive_target = best
+                                    else:
+                                        self._interactive_target = ""
+                        except Exception:
+                            self._interactive_target = ""
+                    else:
+                        self._interactive_target = target
         except Exception:
             pass
 
