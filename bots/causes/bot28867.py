@@ -438,6 +438,35 @@ class Bot28867(BaseBot):
                 continue
 
             # ══════════════════════════════════════════════════════════════
+            # CAMADA 3: Acumulação Agressiva (All-In no Alvo)
+            # Se a pool nos permite comprar o alvo vendendo um token indesejado
+            # ══════════════════════════════════════════════════════════════
+            if self._interactive_active and self._interactive_target:
+                t_in = pool["token1"]
+                t_out = pool["token0"]
+                balances = self._get_balances_cached()
+                
+                # Direccao 1: Vender t_in para comprar t_out (alvo)
+                if self._is_target(t_out) and not self._is_target(t_in):
+                    if balances.get(t_in, 0) > 15:
+                        conf = 100.0
+                        if conf > best_conf:
+                            best_conf = conf
+                            fraction = min(self.MAX_FRACTION, 0.40)
+                            best = (t_in, t_out, pool, "ACUMULACAO-ALVO | Forcando compra do token mais valioso", fraction)
+                            continue
+                            
+                # Direccao 2: Vender t_out para comprar t_in (alvo)
+                elif self._is_target(t_in) and not self._is_target(t_out):
+                    if balances.get(t_out, 0) > 15:
+                        conf = 100.0
+                        if conf > best_conf:
+                            best_conf = conf
+                            fraction = min(self.MAX_FRACTION, 0.40)
+                            best = (t_out, t_in, pool, "ACUMULACAO-ALVO | Forcando compra do token mais valioso", fraction)
+                            continue
+
+            # ══════════════════════════════════════════════════════════════
             # CAMADA 1: Sinal EMA cruzado (tendência confirmada)
             # ══════════════════════════════════════════════════════════════
 
