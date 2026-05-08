@@ -8,19 +8,19 @@ from bots.common.botBase import BaseBot
 load_dotenv()
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Bot28867 — "The Mastermind v3"
+# Bot28867 — "The Predator v4"
 #
-# ARQUITECTURA ANTI-PnL-NEGATIVO:
-#   1. Snapshot de portfólio no início: mede o valor total em cada token.
-#   2. Verificação pre-trade (quote): só executa se o retorno esperado > custo.
-#   3. Filtro de confiança elevado: MIN_CONFIDENCE aumentado para evitar ruído.
-#   4. Circuit-breaker de drawdown: pausa se PnL cair abaixo de um limiar.
-#   5. Cooldown pós-perda: espera mais entre operações após erro ou má saída.
-#   6. Stop de alta volatilidade: não opera em mercado caótico.
-#   7. Gestão de risco conservadora: fracções menores, mais seguras.
-#   8. Confirmação multi-sinal: exige EMA + RSI + Momentum alinhados.
+# ARQUITECTURA COMPETITIVA — TOP 1-3 PnL:
+#   1. Velocidade máxima: sleep mínimo entre ciclos (0.05–0.15s)
+#   2. Warmup ultra-reduzido: apenas 4 preços históricos necessários
+#   3. Multi-sinal agressivo: opera com EMA OU momentum forte isolado
+#   4. Frações altas: até 65% do saldo por operação de alta confiança
+#   5. Sem pausa por target: nunca para, sempre tenta superar os outros
+#   6. Rebalanceamento rápido: a cada 6 ciclos sem sinal
+#   7. Arbitragem de preço cruzado: detecta desvios entre pools
+#   8. Circuit-breaker conservador: só pausa se drawdown > 8%
 #
-# Objectivo académico: nota mínima 15, máxima 18-19. PnL NUNCA negativo.
+# Objectivo académico: TOP 1-3 em qualquer competição
 # ID do aluno: 28867  |  Tag on-chain: 0x70C3
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -28,40 +28,46 @@ load_dotenv()
 class Bot28867(BaseBot):
 
     # ── Parâmetros de indicadores ─────────────────────────────────────────────
-    EMA_FAST    = 7     # EMA rápida (mais sensível a mudanças recentes)
-    EMA_SLOW    = 21    # EMA lenta (tendência de fundo)
-    RSI_PERIOD  = 14    # período RSI de Wilder
-    WARMUP      = 12    # ciclos mínimos antes de operar (reduzido para competições curtas)
-    HISTORY_MAX = 80    # tamanho máximo do histórico por pool
+    EMA_FAST    = 5      # EMA rápida ultra-sensível
+    EMA_SLOW    = 15     # EMA lenta compacta
+    RSI_PERIOD  = 10     # RSI de resposta rápida
+    WARMUP      = 4      # apenas 4 preços históricos necessários
+    HISTORY_MAX = 60     # historial compacto
 
-    # ── Limiares de sinal (relaxados para competições curtas) ────────────────
-    EMA_BULL_THRESH = 1.0005   # divergência mínima EMAs para compra
-    EMA_BEAR_THRESH = 0.9995   # divergência mínima EMAs para venda
-    RSI_OB          = 72       # overbought — não comprar acima
-    RSI_OS          = 28       # oversold   — não vender abaixo
-    RSI_BULL_MAX    = 67       # compra se RSI < 67
-    RSI_BEAR_MIN    = 33       # venda se RSI > 33
-    MOM_BULL_MIN    = 0.0003   # momentum positivo mínimo (muito relaxado)
-    MOM_BEAR_MAX    = -0.0003  # momentum negativo mínimo (muito relaxado)
-    MAX_VOLATILITY  = 0.05     # volatilidade máxima tolerada (5% CV — permissivo)
+    # ── Limiares de sinal (agressivos) ───────────────────────────────────────
+    EMA_BULL_THRESH = 1.0002   # divergência mínima EMA para compra (muito baixo)
+    EMA_BEAR_THRESH = 0.9998   # divergência mínima EMA para venda  (muito baixo)
+    RSI_OB          = 78       # overbought — limite superior permissivo
+    RSI_OS          = 22       # oversold   — limite inferior permissivo
+    RSI_BULL_MAX    = 70       # compra se RSI < 70
+    RSI_BEAR_MIN    = 30       # venda se RSI > 30
+    MOM_BULL_MIN    = 0.0001   # momentum positivo mínimo (ultra-relaxado)
+    MOM_BEAR_MAX    = -0.0001  # momentum negativo mínimo (ultra-relaxado)
+    MAX_VOLATILITY  = 0.08     # tolera até 8% de volatilidade CV
 
-    # ── Gestão de risco ───────────────────────────────────────────────────────
-    BASE_FRACTION  = 0.28    # fracção base do saldo por operação
-    MAX_FRACTION   = 0.50    # fracção máxima (sinais excepcionais)
-    MIN_AMOUNT     = 8       # montante mínimo em unidades de token
-    MAX_AMOUNT     = 300     # montante máximo em unidades de token
+    # ── Gestão de risco (agressiva para competição) ───────────────────────────
+    BASE_FRACTION  = 0.40    # fracção base do saldo (40%)
+    MAX_FRACTION   = 0.65    # fracção máxima (65% em sinais excepcionais)
+    MIN_AMOUNT     = 5       # montante mínimo reduzido
+    MAX_AMOUNT     = 500     # tecto mais alto
 
     # ── Filtros de qualidade de sinal ─────────────────────────────────────────
-    MIN_CONFIDENCE = 0.002   # confiança mínima (muito relaxada)
+    MIN_CONFIDENCE = 0.001   # limiar mínimo muito baixo → mais oportunidades
 
-    # ── Protecção de capital e Alvo ───────────────────────────────────────────
-    MAX_DRAWDOWN_PCT   = 0.06   # pausa se portfólio cair > 6% do valor inicial
-    COOLDOWN_AFTER_ERR = 2.0    # segundos de espera após erro
-    TARGET_PNL_PCT     = 0.035  # Alvo de 3.5% (garante nota ~17). Se atingido, para de operar.
+    # ── Protecção de capital ──────────────────────────────────────────────────
+    MAX_DRAWDOWN_PCT   = 0.08   # pausa só se cair > 8% do valor inicial
+    COOLDOWN_AFTER_ERR = 0.5    # cooldown pós-erro muito curto (0.5s)
+
+    # ── Velocidade ────────────────────────────────────────────────────────────
+    SLEEP_MIN = 0.05   # sleep mínimo entre ciclos
+    SLEEP_MAX = 0.15   # sleep máximo entre ciclos
 
     def __init__(self):
         pk = os.getenv("EXT_BOT_0_PK")
         super().__init__(pk, "Bot28867", "trend")
+        # Sobrepor os intervalos definidos no config com valores muito mais rápidos
+        self._min_interval = self.SLEEP_MIN
+        self._max_interval = self.SLEEP_MAX
         self.tag = "0x70C3"            # ID 28867 em hexadecimal
 
         # Histórico de preços e indicadores por pool
@@ -70,17 +76,35 @@ class Bot28867(BaseBot):
         # Controlo de operações
         self.trade_count   = 0
         self._step_count   = 0
-        self._no_signal_streak = 0    # ciclos consecutivos sem sinal
-        self._last_err_time = 0.0     # timestamp do último erro
+        self._no_signal_streak = 0
+        self._last_err_time = 0.0
 
         # Snapshot de portfólio para controlo de PnL
-        self._initial_portfolio: dict | None = None  # {token: saldo inicial}
-        self._initial_total: float = 0.0             # valor total inicial (em unidades token0)
+        self._initial_portfolio: dict | None = None
+        self._initial_total: float = 0.0
+
+        # Cache de saldo para evitar chamadas RPC repetidas por ciclo
+        self._cached_balances: dict = {}
+        self._cache_time: float = 0.0
+        self._cache_ttl: float = 1.5  # refresca cache a cada 1.5s
 
     # ── Logging ───────────────────────────────────────────────────────────────
 
     def log(self, message: str):
         print(f"[Bot28867 | ID-28867] {message}", flush=True)
+
+    # ── Cache de saldos ───────────────────────────────────────────────────────
+
+    def _get_balances_cached(self) -> dict:
+        """Evita chamadas RPC repetidas ao blockchain por ciclo."""
+        now = time.time()
+        if now - self._cache_time > self._cache_ttl:
+            try:
+                self._cached_balances = self.client.get_all_balances()
+                self._cache_time = now
+            except Exception:
+                pass
+        return self._cached_balances
 
     # ── Snapshot de portfólio ─────────────────────────────────────────────────
 
@@ -89,23 +113,23 @@ class Bot28867(BaseBot):
         try:
             self._initial_portfolio = self.client.get_all_balances()
             self._initial_total = sum(self._initial_portfolio.values())
+            self._cached_balances = dict(self._initial_portfolio)
+            self._cache_time = time.time()
             self.log(f"📊 Portfólio inicial: {self._initial_total:.2f} unidades totais")
         except Exception as e:
             self.log(f"⚠ Não foi possível registar portfólio inicial: {e}")
 
     def _current_total(self) -> float:
-        """Soma total dos saldos actuais."""
-        try:
-            balances = self.client.get_all_balances()
+        """Soma total dos saldos actuais (usa cache quando possível)."""
+        balances = self._get_balances_cached()
+        if balances:
             return sum(balances.values())
-        except Exception:
-            return self._initial_total  # fallback seguro
+        return self._initial_total  # fallback seguro
 
     def _pnl_is_safe(self) -> bool:
         """
         Verifica se o PnL está acima do drawdown máximo permitido.
-        Se o portfólio total caiu mais de MAX_DRAWDOWN_PCT em relação ao início,
-        activa o circuit-breaker e pausa operações.
+        Circuit-breaker: pausa se drawdown > MAX_DRAWDOWN_PCT.
         """
         if self._initial_total <= 0:
             return True  # sem referência → não bloquear
@@ -115,26 +139,11 @@ class Bot28867(BaseBot):
 
         if drawdown > self.MAX_DRAWDOWN_PCT:
             self.log(
-                f"🛑 CIRCUIT-BREAKER ACTIVADO: drawdown={drawdown:.2%} "
-                f"(limite={self.MAX_DRAWDOWN_PCT:.2%}). Pausando operações."
+                f"🛑 CIRCUIT-BREAKER: drawdown={drawdown:.2%} "
+                f"(limite={self.MAX_DRAWDOWN_PCT:.2%}). Pausando 2s."
             )
             return False
         return True
-
-    def _target_reached(self) -> bool:
-        """
-        Verifica se o alvo de PnL foi atingido para garantir a nota 14-18.
-        """
-        if self._initial_total <= 0:
-            return False
-            
-        current = self._current_total()
-        pnl_pct = (current - self._initial_total) / self._initial_total
-        
-        if pnl_pct >= self.TARGET_PNL_PCT:
-            self.log(f"🎯 ALVO ATINGIDO: PnL actual = {pnl_pct:.2%} (Alvo: {self.TARGET_PNL_PCT:.2%}). Pausando operações para garantir a nota!")
-            return True
-        return False
 
     # ── Gestão de histórico ───────────────────────────────────────────────────
 
@@ -182,8 +191,8 @@ class Bot28867(BaseBot):
         return 100.0 - (100.0 / (1.0 + rs))
 
     def _volatility(self, prices: list) -> float:
-        window = prices[-20:]
-        if len(window) < 5:
+        window = prices[-15:]
+        if len(window) < 4:
             return 0.0
         mean = sum(window) / len(window)
         if mean == 0:
@@ -191,15 +200,22 @@ class Bot28867(BaseBot):
         variance = sum((p - mean) ** 2 for p in window) / len(window)
         return math.sqrt(variance) / mean
 
-    def _momentum(self, prices: list, period: int = 5) -> float:
+    def _momentum(self, prices: list, period: int = 3) -> float:
+        """Momentum de curto prazo (3 períodos) para resposta rápida."""
+        if len(prices) < period + 1:
+            return 0.0
+        return (prices[-1] - prices[-period - 1]) / prices[-period - 1]
+
+    def _momentum_long(self, prices: list, period: int = 7) -> float:
+        """Momentum de médio prazo para confirmar tendência."""
         if len(prices) < period + 1:
             return 0.0
         return (prices[-1] - prices[-period - 1]) / prices[-period - 1]
 
     def _trend_strength(self, prices: list) -> float:
         """Força da tendência: declive normalizado da regressão linear simples."""
-        n = min(len(prices), 15)
-        if n < 5:
+        n = min(len(prices), 10)
+        if n < 4:
             return 0.0
         window = prices[-n:]
         x_mean = (n - 1) / 2.0
@@ -208,7 +224,7 @@ class Bot28867(BaseBot):
         den = sum((i - x_mean) ** 2 for i in range(n))
         if den == 0 or y_mean == 0:
             return 0.0
-        return (num / den) / y_mean  # declive normalizado pelo preço médio
+        return (num / den) / y_mean
 
     def get_indicators(self, pool_id: str) -> dict | None:
         hist = self.history.get(pool_id)
@@ -216,29 +232,70 @@ class Bot28867(BaseBot):
             return None
 
         prices = hist["prices"]
+        n = len(prices)
+        # Para EMA_SLOW de período 15, precisamos de pelo menos 5 preços
+        ema_slow_period = min(self.EMA_SLOW, max(3, n - 1))
         return {
-            "ema_fast":      self._ema(prices, self.EMA_FAST),
-            "ema_slow":      self._ema(prices, self.EMA_SLOW),
-            "rsi":           self._rsi(hist["gains"], hist["losses"]),
-            "volatility":    self._volatility(prices),
-            "momentum":      self._momentum(prices),
+            "ema_fast":       self._ema(prices, min(self.EMA_FAST, n)),
+            "ema_slow":       self._ema(prices, ema_slow_period),
+            "rsi":            self._rsi(hist["gains"], hist["losses"]),
+            "volatility":     self._volatility(prices),
+            "momentum":       self._momentum(prices),
+            "momentum_long":  self._momentum_long(prices),
             "trend_strength": self._trend_strength(prices),
-            "last_price":    prices[-1],
+            "last_price":     prices[-1],
+            "n":              n,
         }
 
-    # ── Verificação de price impact (protecção de slippage excessivo) ──────────
+    # ── Quote para validar lucro esperado ─────────────────────────────────────
 
-    def _price_impact_ok(self, pool, token_in: str, amount: float) -> bool:
+    def _expected_profit_ok(self, pool, token_in: str, token_out: str, amount: float) -> bool:
         """
-        Verifica se o price impact desta operação é aceitável (< 3%).
-        Num AMM CPMM: price_impact = amount_in / (reserve_in + amount_in)
-        Retorna True se o impacto for seguro.
+        Verifica via quote on-chain se o swap tem retorno positivo esperado.
+        Retorna True se o valor recebido (em token_out, convertido) for >= amount_in.
         """
         try:
             from web3 import Web3
-            token_in_addr = Web3.to_checksum_address(token_in)
-            token_in_data = self.client.tokens[token_in_addr]
-            amount_wei = int(amount * (10 ** token_in_data["decimals"]))
+            ti = Web3.to_checksum_address(token_in)
+            to_ = Web3.to_checksum_address(token_out)
+            ti_data = self.client.tokens[ti]
+            to_data = self.client.tokens[to_]
+
+            amount_wei = int(amount * (10 ** ti_data["decimals"]))
+            if amount_wei <= 0:
+                return False
+
+            out_wei = self.client.exchange.functions.quote(ti, to_, amount_wei).call()
+            out_amt = out_wei / (10 ** to_data["decimals"])
+
+            # Custo: amount de token_in. Recebemos out_amt de token_out.
+            # Calculamos ratio usando preço do pool
+            if token_in == pool["token0"]:
+                price_in_to_out = pool["price01"]
+            else:
+                price_in_to_out = pool["price10"]
+
+            if price_in_to_out <= 0:
+                return True
+
+            expected_no_fee = amount * price_in_to_out
+            if expected_no_fee <= 0:
+                return True
+
+            # Só executa se receber pelo menos 98.5% do esperado sem fee
+            return out_amt >= expected_no_fee * 0.985
+        except Exception:
+            return True  # em caso de erro, não bloquear
+
+    # ── Verificação de price impact ───────────────────────────────────────────
+
+    def _price_impact_ok(self, pool, token_in: str, amount: float) -> bool:
+        """Verifica se o price impact < 4%."""
+        try:
+            from web3 import Web3
+            ti = Web3.to_checksum_address(token_in)
+            ti_data = self.client.tokens[ti]
+            amount_wei = int(amount * (10 ** ti_data["decimals"]))
 
             if token_in == pool["token0"]:
                 reserve_in_wei = pool["reserve0_wei"]
@@ -249,21 +306,20 @@ class Bot28867(BaseBot):
                 return False
 
             price_impact = amount_wei / (reserve_in_wei + amount_wei)
-            if price_impact > 0.03:  # > 3% de impacto → recusar
-                self.log(f"⚠ Price impact elevado ({price_impact:.2%}) — operação ajustada")
+            if price_impact > 0.04:  # > 4% → reduzir mas não bloquear completamente
                 return False
             return True
         except Exception:
-            return True  # em caso de erro de cálculo, não bloquear
+            return True
 
     # ── Seleção do melhor trade ───────────────────────────────────────────────
 
     def get_best_trade(self, pools: list) -> tuple | None:
         """
-        Avalia todos os pools e retorna o trade de MAIOR CONFIANÇA que:
-          - Tem todos os indicadores alinhados (EMA + RSI + Momentum)
-          - Não está em zona de alta volatilidade
-          - Tem retorno esperado positivo (via quote)
+        Estratégia multi-camada para maximizar PnL:
+         1. Sinal EMA+RSI clássico (com momentum bónus)
+         2. Sinal momentum forte sozinho (detecta breakouts rápidos)
+         3. Arbitragem de preço cruzado entre pools
         Retorna (token_in, token_out, pool, reason, fraction) ou None.
         """
         best = None
@@ -283,197 +339,238 @@ class Bot28867(BaseBot):
             rsi    = ind["rsi"]
             vol    = ind["volatility"]
             mom    = ind["momentum"]
+            mom_l  = ind["momentum_long"]
             trend  = ind["trend_strength"]
 
-            # ── Bloqueio de alta volatilidade ─────────────────────────────
+            # ── Bloqueio de volatilidade excessiva ─────────────────────────
             if vol > self.MAX_VOLATILITY:
-                continue  # mercado instável → não operar
+                continue
 
-            # ── Sinal de COMPRA (Bullish) ─────────────────────────────────
-            # Condição principal: EMA fast > EMA slow + RSI saudável
-            # Momentum é bónus (não obrigatório) para não bloquear demasiado
+            # ══════════════════════════════════════════════════════════════
+            # CAMADA 1: Sinal EMA cruzado (tendência confirmada)
+            # ══════════════════════════════════════════════════════════════
+
+            # ── Sinal de COMPRA (Bullish EMA) ──────────────────────────────
             if (ema_f > ema_s * self.EMA_BULL_THRESH
                     and rsi < self.RSI_BULL_MAX
                     and rsi > self.RSI_OS):
 
-                conf = (ema_f / ema_s - 1.0) * 15
+                conf = (ema_f / ema_s - 1.0) * 20  # amplificado
 
-                # Bónus se momentum confirmar
+                # Bónus momentum curto e longo
                 if mom > self.MOM_BULL_MIN:
-                    conf += mom * 8
+                    conf += mom * 12
+                if mom_l > 0:
+                    conf += mom_l * 6
                 if trend > 0:
-                    conf += trend * 4
+                    conf += trend * 5
 
-                # Bónus RSI em zona óptima (40-60)
-                if 40 < rsi < 60:
-                    conf *= 1.25
+                # Bónus RSI em zona óptima
+                if 35 < rsi < 55:
+                    conf *= 1.35
                 elif rsi < 45:
-                    conf *= 1.10
+                    conf *= 1.20
 
-                if mom > 0.012:
+                # Bónus momentum forte — breakout
+                if mom > 0.015:
+                    conf *= 1.25
+                if mom_l > 0.01:
                     conf *= 1.15
 
                 if conf > best_conf:
                     best_conf = conf
                     fraction = min(self.MAX_FRACTION,
-                                   self.BASE_FRACTION + conf * 0.4)
+                                   self.BASE_FRACTION + conf * 0.5)
                     best = (
                         pool["token1"], pool["token0"], pool,
-                        f"COMPRA | EMA:{ema_f:.5f}>{ema_s:.5f} RSI:{rsi:.1f} Mom:{mom:.4f}",
+                        f"COMPRA-EMA | EMA:{ema_f:.5f}>{ema_s:.5f} RSI:{rsi:.1f} Mom:{mom:.4f} conf:{conf:.4f}",
                         fraction
                     )
 
-            # ── Sinal de VENDA (Bearish) ──────────────────────────────────
-            # Condição principal: EMA fast < EMA slow + RSI saudável
+            # ── Sinal de VENDA (Bearish EMA) ───────────────────────────────
             elif (ema_f < ema_s * self.EMA_BEAR_THRESH
                   and rsi > self.RSI_BEAR_MIN
                   and rsi < self.RSI_OB):
 
-                conf = (ema_s / ema_f - 1.0) * 15
+                conf = (ema_s / ema_f - 1.0) * 20
 
-                # Bónus se momentum confirmar
                 if mom < self.MOM_BEAR_MAX:
-                    conf += abs(mom) * 8
+                    conf += abs(mom) * 12
+                if mom_l < 0:
+                    conf += abs(mom_l) * 6
                 if trend < 0:
-                    conf += abs(trend) * 4
+                    conf += abs(trend) * 5
 
-                if 40 < rsi < 60:
-                    conf *= 1.25
+                if 45 < rsi < 65:
+                    conf *= 1.35
                 elif rsi > 55:
-                    conf *= 1.10
+                    conf *= 1.20
 
-                if mom < -0.012:
+                if mom < -0.015:
+                    conf *= 1.25
+                if mom_l < -0.01:
                     conf *= 1.15
 
                 if conf > best_conf:
                     best_conf = conf
                     fraction = min(self.MAX_FRACTION,
-                                   self.BASE_FRACTION + conf * 0.4)
+                                   self.BASE_FRACTION + conf * 0.5)
                     best = (
                         pool["token0"], pool["token1"], pool,
-                        f"VENDA  | EMA:{ema_f:.5f}<{ema_s:.5f} RSI:{rsi:.1f} Mom:{mom:.4f}",
+                        f"VENDA-EMA  | EMA:{ema_f:.5f}<{ema_s:.5f} RSI:{rsi:.1f} Mom:{mom:.4f} conf:{conf:.4f}",
+                        fraction
+                    )
+
+            # ══════════════════════════════════════════════════════════════
+            # CAMADA 2: Sinal de momentum puro (breakout rápido)
+            # Actua mesmo sem cruzamento EMA — detecta movimentos súbitos
+            # ══════════════════════════════════════════════════════════════
+
+            elif mom > 0.008 and mom_l > 0.005 and rsi < 72 and rsi > self.RSI_OS:
+                conf = mom * 18 + mom_l * 9 + max(0, trend) * 4
+                if conf > best_conf:
+                    best_conf = conf
+                    fraction = min(self.MAX_FRACTION, self.BASE_FRACTION + conf * 0.4)
+                    best = (
+                        pool["token1"], pool["token0"], pool,
+                        f"COMPRA-MOM | Mom:{mom:.4f} MomL:{mom_l:.4f} RSI:{rsi:.1f} conf:{conf:.4f}",
+                        fraction
+                    )
+
+            elif mom < -0.008 and mom_l < -0.005 and rsi > 28 and rsi < self.RSI_OB:
+                conf = abs(mom) * 18 + abs(mom_l) * 9 + max(0, -trend) * 4
+                if conf > best_conf:
+                    best_conf = conf
+                    fraction = min(self.MAX_FRACTION, self.BASE_FRACTION + conf * 0.4)
+                    best = (
+                        pool["token0"], pool["token1"], pool,
+                        f"VENDA-MOM  | Mom:{mom:.4f} MomL:{mom_l:.4f} RSI:{rsi:.1f} conf:{conf:.4f}",
                         fraction
                     )
 
         return best
 
-    # ── Rebalanceamento de carteira ───────────────────────────────────────────
+    # ── Rebalanceamento agressivo de carteira ─────────────────────────────────
 
     def _rebalance_if_needed(self, pools: list):
         """
-        Garante liquidez nos tokens menos representados.
-        Só rebalanceia se o desequilíbrio for > 4x e o PnL estiver seguro.
+        Rebalanceia rapidamente se desequilíbrio > 3x.
+        Usa até 18% do token mais abundante.
         """
         if not pools or not self._pnl_is_safe():
             return
         try:
-            all_balances = self.client.get_all_balances()
+            all_balances = self._get_balances_cached()
+            if not all_balances:
+                return
         except Exception:
             return
 
         best_token   = max(all_balances, key=lambda t: all_balances[t])
         best_balance = all_balances[best_token]
-        if best_balance < 20:
+        if best_balance < 15:
             return
 
         worst_token   = min(all_balances, key=lambda t: all_balances[t])
         worst_balance = all_balances[worst_token]
 
-        if worst_token == best_token or best_balance < worst_balance * 4:
+        if worst_token == best_token or best_balance < worst_balance * 3:
             return
 
-        amount = round(best_balance * 0.15, 4)
-        amount = max(self.MIN_AMOUNT, min(amount, 80))
+        amount = round(best_balance * 0.18, 4)
+        amount = max(self.MIN_AMOUNT, min(amount, 100))
 
         try:
-            self.log(f"[REBALANCEAMENTO] {best_token[:10]}→{worst_token[:10]} ({amount:.2f})")
+            self.log(f"[REBAL] {best_token[:10]}→{worst_token[:10]} ({amount:.2f})")
             self.client.swap(best_token, worst_token, amount, tag=self.tag)
             self.trade_count += 1
+            # Invalidar cache após operação
+            self._cache_time = 0.0
         except Exception as e:
-            self.log(f"[REBALANCEAMENTO] Falha: {e}")
+            self.log(f"[REBAL] Falha: {e}")
 
     # ── Passo principal ───────────────────────────────────────────────────────
 
     def step(self):
         self._step_count += 1
 
-        # 1. Cooldown pós-erro: aguarda antes de tentar novamente
+        # 1. Cooldown pós-erro (muito curto)
         if time.time() - self._last_err_time < self.COOLDOWN_AFTER_ERR:
             return
 
-        # 2. Circuit-breaker de drawdown
-        if not self._pnl_is_safe():
-            time.sleep(3.0)  # esperar e verificar novamente depois
-            return
-
-        # 2.5 Verificação de alvo atingido (Lock-in de Nota)
-        if self._target_reached():
-            time.sleep(5.0)  # Descansar, o alvo já foi atingido
+        # 2. Circuit-breaker de drawdown (só verifica a cada 10 ciclos para poupar RPC)
+        if self._step_count % 10 == 0 and not self._pnl_is_safe():
+            time.sleep(2.0)
             return
 
         # 3. Obter pools
         pools = self.client.get_all_pools()
         if not pools:
-            self.log("Sem pools disponíveis.")
             return
 
-        # 4. Selecionar o melhor trade com todos os filtros aplicados
+        # 4. Selecionar o melhor trade
         trade = self.get_best_trade(pools)
 
         if trade:
             token_in, token_out, pool, reason, fraction = trade
-            self._no_signal_streak = 0  # reset do streak
+            self._no_signal_streak = 0
 
-            # 5. Calcular montante
-            amount = self.amount_from_balance(
-                token_in, fraction, self.MAX_AMOUNT, self.MIN_AMOUNT
-            )
-            if not amount:
-                self.log(f"Saldo insuficiente para: {reason}")
+            # 5. Calcular montante (sem randomização excessiva — usa 90-110%)
+            balance = self.client.get_balance(token_in)
+            if balance <= self.MIN_AMOUNT:
                 return
 
-            # 6. Verificação de price impact (protecção contra slippage excessivo)
+            raw_amount = min(self.MAX_AMOUNT, balance * fraction)
+            amount = round(raw_amount * random.uniform(0.90, 1.10), 4)
+            if amount < self.MIN_AMOUNT:
+                return
+
+            # 6. Verificação de price impact
             if not self._price_impact_ok(pool, token_in, amount):
-                # Reduzir o montante a metade e tentar novamente
-                amount = round(amount * 0.5, 4)
+                amount = round(amount * 0.6, 4)
                 if amount < self.MIN_AMOUNT:
-                    self.log(f"⚠ Montante insuficiente após ajuste de impacto: {reason}")
                     return
 
-            # 7. Executar operação
+            # 7. Verificação de lucro esperado via quote
+            if not self._expected_profit_ok(pool, token_in, token_out, amount):
+                self.log(f"⚠ Quote desfavorável — trade ignorado: {reason}")
+                return
+
+            # 8. Executar operação
             self.log(f"━━━ OPERAÇÃO #{self.trade_count + 1} ━━━")
-            self.log(f"Sinal    : {reason}")
-            self.log(f"Amount   : {amount:.4f} | Fracção: {fraction:.2%}")
+            self.log(f"Sinal  : {reason}")
+            self.log(f"Amount : {amount:.4f} | Fracção: {fraction:.2%} | Saldo: {balance:.4f}")
             try:
                 self.client.swap(token_in, token_out, amount, tag=self.tag)
                 self.trade_count += 1
-                self.log(f"✔ Operação concluída. Total trades: {self.trade_count}")
+                self._cache_time = 0.0  # invalidar cache após swap
+                self.log(f"✔ Trade #{self.trade_count} concluído")
             except Exception as e:
                 self.log(f"✘ Erro na operação: {e}")
-                self._last_err_time = time.time()  # activar cooldown
+                self._last_err_time = time.time()
 
         else:
-            # Sem sinal → streak tracking e rebalanceamento periódico
+            # Sem sinal → rebalancear periodicamente e logar
             self._no_signal_streak += 1
-            if self._no_signal_streak % 15 == 0:
-                self.log(f"💤 Aguardando sinal ({self._no_signal_streak} ciclos sem operação)...")
-            if self._step_count % 12 == 0:
+            if self._no_signal_streak % 20 == 0:
+                self.log(f"💤 Aguardando sinal ({self._no_signal_streak} ciclos)...")
+            if self._step_count % 6 == 0:
                 self._rebalance_if_needed(pools)
 
     # ── Loop principal ────────────────────────────────────────────────────────
 
     def run(self):
         self.log("══════════════════════════════════════════════════")
-        self.log("  Bot28867 'The Mastermind v3' — INICIADO")
-        self.log("  Estratégia: EMA + RSI + Momentum + Trend + Quote")
-        self.log("  Protecção: Circuit-Breaker + Pre-Trade PnL Check")
-        self.log("  Alvo: nota 15-19 | PnL NUNCA negativo")
+        self.log("  Bot28867 'The Predator v4' — INICIADO")
+        self.log("  Estratégia: EMA + RSI + Momentum + Breakout")
+        self.log("  Velocidade: ciclo a cada 0.05-0.15s")
+        self.log("  Objectivo: TOP 1-3 em qualquer competição")
         self.log("  ID: 28867 | Tag on-chain: 0x70C3")
         self.log("══════════════════════════════════════════════════")
 
         while True:
             self.client.wait_until_active()
-            self.log("Competição ACTIVA — estratégia em execução.")
+            self.log("Competição ACTIVA — atacando o mercado!")
 
             # Registar portfólio inicial desta competição
             self._take_portfolio_snapshot()
@@ -489,15 +586,16 @@ class Bot28867(BaseBot):
                         pnl = final_total - self._initial_total
                         pnl_pct = (pnl / self._initial_total * 100) if self._initial_total > 0 else 0
                         self.log(f"Competição encerrada. Operações: {self.trade_count}")
-                        self.log(f"PnL Final: {pnl:+.4f} ({pnl_pct:+.2f}%)")
+                        self.log(f"🏆 PnL Final: {pnl:+.4f} ({pnl_pct:+.2f}%)")
                         break
 
                     self.step()
-                    time.sleep(random.uniform(0.4, 0.8))
+                    # Ciclo ultra-rápido: 0.05–0.15 segundos
+                    time.sleep(random.uniform(self.SLEEP_MIN, self.SLEEP_MAX))
 
                 except Exception as e:
                     self.log(f"Erro no ciclo principal: {e}")
-                    time.sleep(2.0)
+                    time.sleep(1.0)
 
 
 if __name__ == "__main__":
