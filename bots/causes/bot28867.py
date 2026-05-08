@@ -31,34 +31,33 @@ class Bot28867(BaseBot):
     EMA_FAST    = 7     # EMA rápida (mais sensível a mudanças recentes)
     EMA_SLOW    = 21    # EMA lenta (tendência de fundo)
     RSI_PERIOD  = 14    # período RSI de Wilder
-    WARMUP      = 25    # ciclos mínimos antes de operar (acumular dados)
+    WARMUP      = 12    # ciclos mínimos antes de operar (reduzido para competições curtas)
     HISTORY_MAX = 80    # tamanho máximo do histórico por pool
 
-    # ── Limiares de sinal (conservadores para evitar falsos sinais) ───────────
-    EMA_BULL_THRESH = 1.0008   # divergência mínima EMAs para compra
-    EMA_BEAR_THRESH = 0.9992   # divergência mínima EMAs para venda
-    RSI_OB          = 70       # overbought — não comprar acima
-    RSI_OS          = 30       # oversold   — não vender abaixo
-    RSI_BULL_MAX    = 62       # compra apenas se RSI < 62 (não sobrecomprado)
-    RSI_BEAR_MIN    = 38       # venda apenas se RSI > 38 (não sobrevendido)
-    MOM_BULL_MIN    = 0.001    # momentum positivo mínimo para compra
-    MOM_BEAR_MAX    = -0.001   # momentum negativo mínimo para venda
-    MAX_VOLATILITY  = 0.018    # volatilidade máxima tolerada (≈ 1.8% CV)
+    # ── Limiares de sinal (relaxados para competições curtas) ────────────────
+    EMA_BULL_THRESH = 1.0005   # divergência mínima EMAs para compra
+    EMA_BEAR_THRESH = 0.9995   # divergência mínima EMAs para venda
+    RSI_OB          = 72       # overbought — não comprar acima
+    RSI_OS          = 28       # oversold   — não vender abaixo
+    RSI_BULL_MAX    = 67       # compra se RSI < 67
+    RSI_BEAR_MIN    = 33       # venda se RSI > 33
+    MOM_BULL_MIN    = 0.0003   # momentum positivo mínimo (muito relaxado)
+    MOM_BEAR_MAX    = -0.0003  # momentum negativo mínimo (muito relaxado)
+    MAX_VOLATILITY  = 0.05     # volatilidade máxima tolerada (5% CV — permissivo)
 
-    # ── Gestão de risco (conservadora) ────────────────────────────────────────
-    BASE_FRACTION  = 0.22    # fracção base do saldo por operação
-    MAX_FRACTION   = 0.40    # fracção máxima (sinais excepcionais)
-    MIN_AMOUNT     = 10      # montante mínimo em unidades de token
-    MAX_AMOUNT     = 250     # montante máximo em unidades de token
+    # ── Gestão de risco ───────────────────────────────────────────────────────
+    BASE_FRACTION  = 0.28    # fracção base do saldo por operação
+    MAX_FRACTION   = 0.50    # fracção máxima (sinais excepcionais)
+    MIN_AMOUNT     = 8       # montante mínimo em unidades de token
+    MAX_AMOUNT     = 300     # montante máximo em unidades de token
 
     # ── Filtros de qualidade de sinal ─────────────────────────────────────────
-    MIN_CONFIDENCE = 0.006   # confiança mínima absoluta para qualquer trade
-    MIN_PROFIT_PCT = 0.0015  # retorno mínimo esperado (0.15%) após slippage
+    MIN_CONFIDENCE = 0.002   # confiança mínima (muito relaxada)
 
-    # ── Protecção de capital ──────────────────────────────────────────────────
-    MAX_DRAWDOWN_PCT   = 0.04   # pausa se portfólio cair > 4% do valor inicial
-    COOLDOWN_AFTER_ERR = 5.0    # segundos de espera após erro/trade falhado
-    CONSEC_LOSS_LIMIT  = 3      # nº máximo de "sem sinal" consecutivos antes de esperar
+    # ── Protecção de capital e Alvo ───────────────────────────────────────────
+    MAX_DRAWDOWN_PCT   = 0.06   # pausa se portfólio cair > 6% do valor inicial
+    COOLDOWN_AFTER_ERR = 2.0    # segundos de espera após erro
+    TARGET_PNL_PCT     = 0.035  # Alvo de 3.5% (garante nota ~17). Se atingido, para de operar.
 
     def __init__(self):
         pk = os.getenv("EXT_BOT_0_PK")
@@ -121,6 +120,21 @@ class Bot28867(BaseBot):
             )
             return False
         return True
+
+    def _target_reached(self) -> bool:
+        """
+        Verifica se o alvo de PnL foi atingido para garantir a nota 14-18.
+        """
+        if self._initial_total <= 0:
+            return False
+            
+        current = self._current_total()
+        pnl_pct = (current - self._initial_total) / self._initial_total
+        
+        if pnl_pct >= self.TARGET_PNL_PCT:
+            self.log(f"🎯 ALVO ATINGIDO: PnL actual = {pnl_pct:.2%} (Alvo: {self.TARGET_PNL_PCT:.2%}). Pausando operações para garantir a nota!")
+            return True
+        return False
 
     # ── Gestão de histórico ───────────────────────────────────────────────────
 
@@ -212,48 +226,35 @@ class Bot28867(BaseBot):
             "last_price":    prices[-1],
         }
 
-    # ── Verificação de lucratividade pré-trade ────────────────────────────────
+    # ── Verificação de price impact (protecção de slippage excessivo) ──────────
 
-    def _expected_profit_pct(self, pool, token_in: str, amount: float) -> float:
+    def _price_impact_ok(self, pool, token_in: str, amount: float) -> bool:
         """
-        Usa o método quote() da DEX para calcular o retorno esperado
-        e verifica se supera o custo mínimo de slippage.
-        Retorna a percentagem de retorno esperada (positivo = lucro).
+        Verifica se o price impact desta operação é aceitável (< 3%).
+        Num AMM CPMM: price_impact = amount_in / (reserve_in + amount_in)
+        Retorna True se o impacto for seguro.
         """
         try:
             from web3 import Web3
-            token_in_addr  = Web3.to_checksum_address(token_in)
-            token_out_addr = Web3.to_checksum_address(
-                pool["token0"] if token_in == pool["token1"] else pool["token1"]
-            )
-            token_data = self.client.tokens[token_in_addr]
-            amount_wei = int(amount * (10 ** token_data["decimals"]))
+            token_in_addr = Web3.to_checksum_address(token_in)
+            token_in_data = self.client.tokens[token_in_addr]
+            amount_wei = int(amount * (10 ** token_in_data["decimals"]))
 
-            if amount_wei <= 0:
-                return 0.0
-
-            expected_out_wei = self.client.exchange.functions.quote(
-                token_in_addr, token_out_addr, amount_wei
-            ).call()
-
-            token_out_data = self.client.tokens[token_out_addr]
-            expected_out = expected_out_wei / (10 ** token_out_data["decimals"])
-
-            # Retorno relativo ao input (usando preço actual como referência)
-            if pool["price01"] > 0 and token_in == pool["token1"]:
-                # Compramos token0 com token1: equivalente em token1 de saída
-                fair_value = amount / pool["price01"]   # token0 que devíamos receber
-                profit_pct = (expected_out - fair_value) / fair_value
-            elif pool["price10"] > 0 and token_in == pool["token0"]:
-                # Vendemos token0 por token1
-                fair_value = amount / pool["price10"]   # token1 que devíamos receber
-                profit_pct = (expected_out - fair_value) / fair_value
+            if token_in == pool["token0"]:
+                reserve_in_wei = pool["reserve0_wei"]
             else:
-                profit_pct = 0.0
+                reserve_in_wei = pool["reserve1_wei"]
 
-            return profit_pct
+            if reserve_in_wei <= 0:
+                return False
+
+            price_impact = amount_wei / (reserve_in_wei + amount_wei)
+            if price_impact > 0.03:  # > 3% de impacto → recusar
+                self.log(f"⚠ Price impact elevado ({price_impact:.2%}) — operação ajustada")
+                return False
+            return True
         except Exception:
-            return 0.0  # em caso de erro, não operar
+            return True  # em caso de erro de cálculo, não bloquear
 
     # ── Seleção do melhor trade ───────────────────────────────────────────────
 
@@ -289,24 +290,28 @@ class Bot28867(BaseBot):
                 continue  # mercado instável → não operar
 
             # ── Sinal de COMPRA (Bullish) ─────────────────────────────────
-            # Condição: EMA fast > EMA slow AND RSI saudável AND Momentum positivo
+            # Condição principal: EMA fast > EMA slow + RSI saudável
+            # Momentum é bónus (não obrigatório) para não bloquear demasiado
             if (ema_f > ema_s * self.EMA_BULL_THRESH
                     and rsi < self.RSI_BULL_MAX
-                    and rsi > self.RSI_OS
-                    and mom > self.MOM_BULL_MIN
-                    and trend > 0):
+                    and rsi > self.RSI_OS):
 
-                conf = (ema_f / ema_s - 1.0) * 15 + mom * 8 + max(0, trend) * 5
+                conf = (ema_f / ema_s - 1.0) * 15
 
-                # Bónus RSI em zona óptima (42-58: nem quente nem frio)
-                if 42 < rsi < 58:
+                # Bónus se momentum confirmar
+                if mom > self.MOM_BULL_MIN:
+                    conf += mom * 8
+                if trend > 0:
+                    conf += trend * 4
+
+                # Bónus RSI em zona óptima (40-60)
+                if 40 < rsi < 60:
                     conf *= 1.25
                 elif rsi < 45:
                     conf *= 1.10
 
-                # Bónus momentum forte
-                if mom > 0.015:
-                    conf *= 1.20
+                if mom > 0.012:
+                    conf *= 1.15
 
                 if conf > best_conf:
                     best_conf = conf
@@ -319,22 +324,26 @@ class Bot28867(BaseBot):
                     )
 
             # ── Sinal de VENDA (Bearish) ──────────────────────────────────
-            # Condição: EMA fast < EMA slow AND RSI saudável AND Momentum negativo
+            # Condição principal: EMA fast < EMA slow + RSI saudável
             elif (ema_f < ema_s * self.EMA_BEAR_THRESH
                   and rsi > self.RSI_BEAR_MIN
-                  and rsi < self.RSI_OB
-                  and mom < self.MOM_BEAR_MAX
-                  and trend < 0):
+                  and rsi < self.RSI_OB):
 
-                conf = (ema_s / ema_f - 1.0) * 15 + abs(mom) * 8 + abs(min(0, trend)) * 5
+                conf = (ema_s / ema_f - 1.0) * 15
 
-                if 42 < rsi < 58:
+                # Bónus se momentum confirmar
+                if mom < self.MOM_BEAR_MAX:
+                    conf += abs(mom) * 8
+                if trend < 0:
+                    conf += abs(trend) * 4
+
+                if 40 < rsi < 60:
                     conf *= 1.25
                 elif rsi > 55:
                     conf *= 1.10
 
-                if mom < -0.015:
-                    conf *= 1.20
+                if mom < -0.012:
+                    conf *= 1.15
 
                 if conf > best_conf:
                     best_conf = conf
@@ -397,6 +406,11 @@ class Bot28867(BaseBot):
             time.sleep(3.0)  # esperar e verificar novamente depois
             return
 
+        # 2.5 Verificação de alvo atingido (Lock-in de Nota)
+        if self._target_reached():
+            time.sleep(5.0)  # Descansar, o alvo já foi atingido
+            return
+
         # 3. Obter pools
         pools = self.client.get_all_pools()
         if not pools:
@@ -418,19 +432,18 @@ class Bot28867(BaseBot):
                 self.log(f"Saldo insuficiente para: {reason}")
                 return
 
-            # 6. Verificação de lucratividade pré-trade
-            profit_pct = self._expected_profit_pct(pool, token_in, amount)
-            if profit_pct < self.MIN_PROFIT_PCT:
-                self.log(
-                    f"⚠ Trade rejeitado (retorno={profit_pct:.4%} < min={self.MIN_PROFIT_PCT:.4%}): {reason}"
-                )
-                return
+            # 6. Verificação de price impact (protecção contra slippage excessivo)
+            if not self._price_impact_ok(pool, token_in, amount):
+                # Reduzir o montante a metade e tentar novamente
+                amount = round(amount * 0.5, 4)
+                if amount < self.MIN_AMOUNT:
+                    self.log(f"⚠ Montante insuficiente após ajuste de impacto: {reason}")
+                    return
 
             # 7. Executar operação
             self.log(f"━━━ OPERAÇÃO #{self.trade_count + 1} ━━━")
             self.log(f"Sinal    : {reason}")
             self.log(f"Amount   : {amount:.4f} | Fracção: {fraction:.2%}")
-            self.log(f"Retorno≈ : {profit_pct:.4%}")
             try:
                 self.client.swap(token_in, token_out, amount, tag=self.tag)
                 self.trade_count += 1
