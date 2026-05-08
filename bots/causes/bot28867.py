@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import random
 import math
@@ -6,6 +7,12 @@ from dotenv import load_dotenv
 from bots.common.botBase import BaseBot
 
 load_dotenv()
+
+# Forçar encoding UTF-8 na saída (evita UnicodeEncodeError no Windows cp1252)
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Bot28867 — "The Predator v4"
@@ -57,17 +64,19 @@ class Bot28867(BaseBot):
     # ── Protecção de capital ──────────────────────────────────────────────────
     MAX_DRAWDOWN_PCT   = 0.08   # pausa só se cair > 8% do valor inicial
     COOLDOWN_AFTER_ERR = 0.5    # cooldown pós-erro muito curto (0.5s)
+    TRADER_COOLDOWN    = 2.1    # cooldown on-chain entre trades (segundos)
 
     # ── Velocidade ────────────────────────────────────────────────────────────
-    SLEEP_MIN = 0.05   # sleep mínimo entre ciclos
-    SLEEP_MAX = 0.15   # sleep máximo entre ciclos
+    SLEEP_MIN = 0.3    # sleep mínimo entre ciclos (respeita cooldown on-chain)
+    SLEEP_MAX = 0.8    # sleep máximo entre ciclos
 
     def __init__(self):
         pk = os.getenv("EXT_BOT_0_PK")
         super().__init__(pk, "Bot28867", "trend")
-        # Sobrepor os intervalos definidos no config com valores muito mais rápidos
+        # Sobrepor os intervalos definidos no config com valores mais rápidos
         self._min_interval = self.SLEEP_MIN
         self._max_interval = self.SLEEP_MAX
+        self._last_trade_time = 0.0   # controlo do cooldown on-chain
         self.tag = "0x70C3"            # ID 28867 em hexadecimal
 
         # Histórico de preços e indicadores por pool
@@ -536,47 +545,60 @@ class Bot28867(BaseBot):
                 self.log(f"⚠ Quote desfavorável — trade ignorado: {reason}")
                 return
 
-            # 8. Executar operação
-            self.log(f"━━━ OPERAÇÃO #{self.trade_count + 1} ━━━")
+            # 8. Verificar cooldown on-chain
+            elapsed_since_trade = time.time() - self._last_trade_time
+            if elapsed_since_trade < self.TRADER_COOLDOWN:
+                wait_left = self.TRADER_COOLDOWN - elapsed_since_trade
+                time.sleep(wait_left)
+
+            # 9. Executar operação
+            self.log(f"--- OPERACAO #{self.trade_count + 1} ---")
             self.log(f"Sinal  : {reason}")
-            self.log(f"Amount : {amount:.4f} | Fracção: {fraction:.2%} | Saldo: {balance:.4f}")
+            self.log(f"Amount : {amount:.4f} | Fracao: {fraction:.2%} | Saldo: {balance:.4f}")
             try:
                 self.client.swap(token_in, token_out, amount, tag=self.tag)
                 self.trade_count += 1
-                self._cache_time = 0.0  # invalidar cache após swap
-                self.log(f"✔ Trade #{self.trade_count} concluído")
+                self._last_trade_time = time.time()  # registar tempo do ultimo trade
+                self._cache_time = 0.0               # invalidar cache apos swap
+                self.log(f"[OK] Trade #{self.trade_count} concluido")
             except Exception as e:
-                self.log(f"✘ Erro na operação: {e}")
+                err_str = str(e)
+                if 'cooldown' in err_str.lower():
+                    self.log(f"[COOLDOWN] Aguardando cooldown on-chain...")
+                    self._last_trade_time = time.time()  # forcar espera
+                else:
+                    self.log(f"[ERRO] Falha na operacao: {err_str[:120]}")
                 self._last_err_time = time.time()
 
         else:
             # Sem sinal → rebalancear periodicamente e logar
             self._no_signal_streak += 1
             if self._no_signal_streak % 20 == 0:
-                self.log(f"💤 Aguardando sinal ({self._no_signal_streak} ciclos)...")
+                self.log(f"[WAIT] Aguardando sinal ({self._no_signal_streak} ciclos sem operacao)")
             if self._step_count % 6 == 0:
                 self._rebalance_if_needed(pools)
 
     # ── Loop principal ────────────────────────────────────────────────────────
 
     def run(self):
-        self.log("══════════════════════════════════════════════════")
-        self.log("  Bot28867 'The Predator v4' — INICIADO")
-        self.log("  Estratégia: EMA + RSI + Momentum + Breakout")
-        self.log("  Velocidade: ciclo a cada 0.05-0.15s")
-        self.log("  Objectivo: TOP 1-3 em qualquer competição")
+        self.log("=================================================")
+        self.log("  Bot28867 'The Predator v4' - INICIADO")
+        self.log("  Estrategia: EMA + RSI + Momentum + Breakout")
+        self.log("  Velocidade: ciclo a cada 0.3-0.8s")
+        self.log("  Objectivo: TOP 1-3 em qualquer competicao")
         self.log("  ID: 28867 | Tag on-chain: 0x70C3")
-        self.log("══════════════════════════════════════════════════")
+        self.log("=================================================")
 
         while True:
             self.client.wait_until_active()
-            self.log("Competição ACTIVA — atacando o mercado!")
+            self.log("Competicao ACTIVA - atacando o mercado!")
 
             # Registar portfólio inicial desta competição
             self._take_portfolio_snapshot()
             self._step_count = 0
             self._no_signal_streak = 0
             self._last_err_time = 0.0
+            self._last_trade_time = 0.0
 
             while True:
                 try:
@@ -585,12 +607,12 @@ class Bot28867(BaseBot):
                         final_total = self._current_total()
                         pnl = final_total - self._initial_total
                         pnl_pct = (pnl / self._initial_total * 100) if self._initial_total > 0 else 0
-                        self.log(f"Competição encerrada. Operações: {self.trade_count}")
-                        self.log(f"🏆 PnL Final: {pnl:+.4f} ({pnl_pct:+.2f}%)")
+                        self.log(f"Competicao encerrada. Operacoes: {self.trade_count}")
+                        self.log(f"[PnL Final] {pnl:+.4f} ({pnl_pct:+.2f}%)")
                         break
 
                     self.step()
-                    # Ciclo ultra-rápido: 0.05–0.15 segundos
+                    # Ciclo rapido: 0.3-0.8 segundos
                     time.sleep(random.uniform(self.SLEEP_MIN, self.SLEEP_MAX))
 
                 except Exception as e:
